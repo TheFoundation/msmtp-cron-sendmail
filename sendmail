@@ -1,0 +1,69 @@
+#!/bin/bash
+
+LogOutput='y'
+EmailOutput='y'
+MailFrom=$(grep from  /etc/msmtprc |grep "@"|sed 's/from\( \+\|\t\+\)//g')
+# Multiple addresses may be separated by commas
+#MailTo='hostname-cron@...45...'
+# If 'n', $MailTo is prepended to the cron MAILTO
+ReplaceMailTo='y'
+# If 'y', unqualified addresses are removed from the cron MAILTO before appending
+#DropUnqualifiedTo='y'
+DropUnqualifiedTo='n'
+
+
+
+# Copy arguments to an array
+Args=("$@")
+
+# Determine whether we were called by cron
+Cron='n'
+for ArgNum in "${!Args[@]}" ; do
+  if [ "${Args[$ArgNum]}" = '-FCronDaemon' ] ; then
+    Cron='y'
+    break
+  fi
+done
+
+# If we were not called by cron, simply pass through to the real sendmail
+if [ "$Cron" = 'n' ] ; then
+  /usr/sbin/sendmail.real "$@"
+  exit $?
+fi
+
+# If we get here, we were called by cron
+Status=0
+
+# Read STDIN into an environment variable so we can both log and email it
+Input="$(cat)"
+
+# Log the cron job's output (everything after the message headers)
+if [ "$LogOutput" = 'y' ] ; then
+  echo "$Input" | perl -0777 -n -e '@i=split(/\n\n/, $_, 2); print($i[1]);' > /tmp/sendmail.log  #| logger -p cron.warn --skip-empty
+  Status=$?
+fi
+
+if [ "$EmailOutput" = 'y' ] ; then
+  # Replace the From addresses
+  if [ -n "$MailFrom" ] ; then
+    Args[$ArgNum]="-F$MailFrom"
+    Input="$(echo "$Input" | perl -0777 -p -e "\$f='$MailFrom';" -e 's/^From: root .*$/From: $f/m')"
+  fi
+
+  # Modify the To addresses
+  if [ -n "$MailTo" ] ; then
+    if [ "$ReplaceMailTo" = 'n' ] ; then
+      CronMailTo="${Args[-1]}"
+      if [ "$DropUnqualifiedTo" = 'y' ] ; then
+        CronMailTo="$(echo "$CronMailTo" | perl -n -e 'print join(",", grep(/@/, split(/,/)));')"
+      fi
+      [ -n "$CronMailTo" ] && MailTo="$MailTo,$CronMailTo"
+    fi
+    Args[-1]="$MailTo"
+    Input="$(echo "$Input" | perl -0777 -p -e "\$t='$MailTo';" -e 's/^To: .*$/To: $t/m')"
+  fi
+  # Send the email
+  echo "${Args[@]}" 2>&1 >/tmp/sendmail.args.log
+  echo "$Input" | /usr/sbin/sendmail.real  "${Args[@]}" #2>&1|tee >/tmp/sendmail.real.log
+  Status=$?
+fi
