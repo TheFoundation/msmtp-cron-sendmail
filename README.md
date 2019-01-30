@@ -3,6 +3,8 @@
 
 
 QUICK INSTALL: mv /usr/sbin/sendmail /usr/sbin/sendmail.real;ln -s /etc/custom/msmtp-cron-sendmail/sendmail /usr/sbin/
+
+
 (or link your sendmail to also react as /usr/sbin/sendmail.real , then link this script to an earlier PATH stage , e.g. /sbin/ )
 
 have fun
