@@ -27,6 +27,7 @@ done
 
 # If we were not called by cron, simply pass through to the real sendmail
 if [ "$Cron" = 'n' ] ; then
+export TMPDIR=/tmp/
   /usr/sbin/sendmail.real "$@"
   exit $?
 fi
@@ -63,6 +64,8 @@ if [ "$EmailOutput" = 'y' ] ; then
     Input="$(echo "$Input" | perl -0777 -p -e "\$t='$MailTo';" -e 's/^To: .*$/To: $t/m')"
   fi
   # Send the email
+export TMPDIR=/tmp/
+
   echo "${Args[@]}" 2>&1 >/tmp/sendmail.args.log
   echo "$Input" | /usr/sbin/sendmail.real  "${Args[@]}" #2>&1|tee >/tmp/sendmail.real.log
   Status=$?
