@@ -1,72 +1,137 @@
 #!/bin/bash
 
-LogOutput='y'
-EmailOutput='y'
-MailFrom=$(grep from  /etc/msmtprc |grep "@"|sed 's/from\( \+\|\t\+\)//g')
+test -e /etc/sendmail.msmtp.conf && source /etc/sendmail.msmtp.conf
+
+# Read STDIN into a variable so we can both log and email it
+Input="$(cat)"
+
+verbose=0
+
+
+LogDebug=1
+
+## if you want to send it , enable this 
+EmailOutput=1
+
+##ONLY FOR TESTING
+## DO NOT LOG IN REAL LIFE (CRIME...)
+
+LogMailContent=0
+
+
+##ONLY FOR TESTING
+## DO NOT LOG IN REAL LIFE 
+
+SysMailFrom=$(grep from  /etc/msmtprc |grep "@"|sed 's/from\( \+\|\t\+\)//g')
+
 # Multiple addresses may be separated by commas
 #MailTo='hostname-cron@...45...'
+
 # If 'n', $MailTo is prepended to the cron MAILTO
-ReplaceMailTo='y'
+ReplaceMailTo=1
+
+
 # If 'y', unqualified addresses are removed from the cron MAILTO before appending
 #DropUnqualifiedTo='y'
-DropUnqualifiedTo='n'
-
+DropUnqualifiedTo=1
 
 
 # Copy arguments to an array
 Args=("$@")
 
-# Determine whether we were called by cron
-Cron='n'
+# Determine whether we were called by cron and replace "@" in the Sender Name
+Cron=0
+
 for ArgNum in "${!Args[@]}" ; do
   if [ "${Args[$ArgNum]}" = '-FCronDaemon' ] ; then
-    Cron='y'
+    Cron=1
     break
   fi
+  
+
+### since the following msmtp will not double-quote our sender name,
+### we are going to change data that were blindly sent with @ inside the string
+  if [[ "${Args[$ArgNum]}" =~ '@' ]] ; then
+    Args[$ArgNum]=$(echo "${Args[$ArgNum]}" |sed 's/@/_AT_/g')
+    #echo ATFOUND;echo ${Args[$ArgNum]}
+  fi
+
+  
 done
 
+########### END PREPROCESSOR
+
+########### BEGIN NORMAL MAIL
 # If we were not called by cron, simply pass through to the real sendmail
-if [ "$Cron" = 'n' ] ; then
-export TMPDIR=/tmp/
-  /usr/sbin/sendmail.real "$@"
-  exit $?
+if [ "$Cron" -eq 0 ] ; then
+
+    export TMPDIR=/tmp/
+    #echo "sending" "${Args[@]}"
+    [ "${LogMailContent}" -eq 1 ] && {  echo "$Input" | tee /tmp/sendbmail.passrh.log | /usr/sbin/sendmail.real "${Args[@]}" ; } ;
+    [ "${LogMailContent}" -eq 1 ] || {  echo "$Input" | /usr/sbin/sendmail.real "${Args[@]}" ; } ;
+    
+    [ "${LogDebug}" -eq 1 ] && ( echo "DEBUG:ARGS: " "${Args[@]}" > /tmp/sendmail.debug.log )
+    [ "${verbose}"  -eq 1 ] && ( echo "PASSTHROUGH" >> /tmp/sendmail.debug.log )
+    
+    exit $?
 fi
+########### END NORMAL MAIL
+
+
 
 # If we get here, we were called by cron
 Status=0
 
-# Read STDIN into an environment variable so we can both log and email it
-Input="$(cat)"
 
-# Log the cron job's output (everything after the message headers)
-if [ "$LogOutput" = 'y' ] ; then
-  echo "$Input" | perl -0777 -n -e '@i=split(/\n\n/, $_, 2); print($i[1]);' > /tmp/sendmail.log  #| logger -p cron.warn --skip-empty
-  Status=$?
-fi
+## we were called by cron
+if [ "$Cron" -eq 1 ] ; then
 
-if [ "$EmailOutput" = 'y' ] ; then
-  # Replace the From addresses
-  if [ -n "$MailFrom" ] ; then
-    Args[$ArgNum]="-F$MailFrom"
-    Input="$(echo "$Input" | perl -0777 -p -e "\$f='$MailFrom';" -e 's/^From: root .*$/From: $f/m')"
-  fi
+# Log the cron job's output (everything after the message headers, DANGER , MAY LEAVE PRIVATE STUFF ON SYSTEM)
+    if [ "$LogMailContent" -eq 1 ] ; then
+      echo "$Input" | perl -0777 -n -e '@i=split(/\n\n/, $_, 2); print($i[1]);' > /tmp/sendmail.content.log  #| logger -p cron.warn --skip-empty
+      Status=$?
+    fi
 
-  # Modify the To addresses
-  if [ -n "$MailTo" ] ; then
-    if [ "$ReplaceMailTo" = 'n' ] ; then
-      CronMailTo="${Args[-1]}"
+## if we plan to send something
+    if [ "$EmailOutput"  -eq 1 ] ; then
+    
+# Replace the From addresses
+     for ArgNum in "${!Args[@]}" ; do
+        if [[ "${Args[$ArgNum]}" =~ '^-F' ]] ; then
+            if [ -n "$SysMailFrom" ] ; then
+              Args[$ArgNum]="-F$SysMailFrom"
+              Input="$(echo "$Input" | perl -0777 -p -e "\$f='$SysMailFrom';" -e 's/^From: .*$/From: $f/m')"
+            fi
+        fi
+      done
+    fi
+# Modify the To addresses
+  if [ -n "$MailTo" ] ; then   echo "havemailto"
+   if [ "$ReplaceMailTo" -eq 1 ] ; then
+
+   ## WE KNOW THAT CRON SETS THE DESTINATION AS LAST ARGUMENT
+      #NEW SCHOOL : CronMailTo="${Args[-1]}"
+      # COMPATIBLE:
+      CronMailTo="${Args[${#Args[@]} - 1]}"
       if [ "$DropUnqualifiedTo" = 'y' ] ; then
-        CronMailTo="$(echo "$CronMailTo" | perl -n -e 'print join(",", grep(/@/, split(/,/)));')"
+        CronMailTo=$(echo "$CronMailTo" | perl -n -e 'print join(",", grep(/@/, split(/,/)));')
       fi
       [ -n "$CronMailTo" ] && MailTo="$MailTo,$CronMailTo"
     fi
-    Args[-1]="$MailTo"
-    Input="$(echo "$Input" | perl -0777 -p -e "\$t='$MailTo';" -e 's/^To: .*$/To: $t/m')"
-  fi
-  # Send the email
-export TMPDIR=/tmp/
+    Args[${#Args[@]} - 1]='$MailTo'
+    Input=$(echo "$Input" | perl -0777 -p -e "\$t='$MailTo';" -e 's/^To: .*$/To: $t/m')
+  fi  
 
-  echo "${Args[@]}" 2>&1 >/tmp/sendmail.args.log
-  echo "$Input" | /usr/sbin/sendmail.real  "${Args[@]}" #2>&1|tee >/tmp/sendmail.real.log
-  Status=$?
+# Send the email
+    export TMPDIR=/tmp/
+    [ "${LogMailContent}" -eq 1 ] && {  echo "$Input" | tee /tmp/sendbmail.passrh.log | /usr/sbin/sendmail.real "${Args[@]}" ; } ;
+    [ "${LogMailContent}" -eq 1 ] || {  echo "$Input" | /usr/sbin/sendmail.real "${Args[@]}" ; } ;
+    
+    [ "${LogDebug}" -eq 1 ] && ( echo "DEBUG:ARGS: " "${Args[@]}" > /tmp/sendmail.debug.log )
+    [ "${verbose}"  -eq 1 ] && ( echo "PASSTHROUGH" >> /tmp/sendmail.debug.log )
+    Status=$?
 fi
+
+
+
+exit "$Status"
