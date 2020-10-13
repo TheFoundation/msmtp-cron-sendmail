@@ -22,7 +22,7 @@ LogMailContent=0
 ##ONLY FOR TESTING
 ## DO NOT LOG IN REAL LIFE 
 
-SysMailFrom=$(grep from  /etc/msmtprc |grep "@"|sed 's/from\( \+\|\t\+\)//g')
+SysMailFrom=$(grep from  /etc/msmtprc |grep "@"|sed 's/from\( \+\|\t\+\)//g'|sed 's/"//g')
 
 # Multiple addresses may be separated by commas
 #MailTo='hostname-cron@...45...'
@@ -51,12 +51,12 @@ for ArgNum in "${!Args[@]}" ; do
 
 ### since the following msmtp will not double-quote our sender name,
 ### we are going to change data that were blindly sent with @ inside the string
-  if [[ "${Args[$ArgNum]}" =~ '@' ]] ; then
+  [[ "${Args[$ArgNum]}" =~ ^'-F' ]] &&  if [[ "${Args[$ArgNum]}" =~ '@' ]] ; then
     Args[$ArgNum]=$(echo "${Args[$ArgNum]}" |sed 's/@/_AT_/g')
     #echo ATFOUND;echo ${Args[$ArgNum]}
   fi
 
-  
+
 done
 
 ########### END PREPROCESSOR
@@ -92,21 +92,50 @@ if [ "$Cron" -eq 1 ] ; then
       Status=$?
     fi
 
-## if we plan to send something
-    if [ "$EmailOutput"  -eq 1 ] ; then
-    
+## we plan to send something
+#    if [ "$EmailOutput"  -eq 1 ] ; then
+#    
+#    fi
+
+
+
 # Replace the From addresses
      for ArgNum in "${!Args[@]}" ; do
         if [[ "${Args[$ArgNum]}" =~ '^-F' ]] ; then
             if [ -n "$SysMailFrom" ] ; then
               Args[$ArgNum]="-F$SysMailFrom"
-              Input="$(echo "$Input" | perl -0777 -p -e "\$f='$SysMailFrom';" -e 's/^From: .*$/From: $f/m')"
             fi
         fi
       done
-    fi
+      ## if there is an unqalified sender , we replace it against mailfrom from msmtp
+    #Input="$(echo "$Input" | perl -0777 -p -e "\$f='$SysMailFrom';" -e 's/^From: [A-Za-z0-9_.\-]+ /From: $f /m')"
+
+    #Input="$(echo "$Input" | sed 's/^From: \([A-Za-z0-9_.\-]+\) \(.*\)/From: \2 <'${SysMailFrom}'> /m')"
+    Input="$(echo "$Input" | sed 's/^From: \(.*\)/From: \1 <'${SysMailFrom}'> /m')"
+ #echo "$Input" |grep From: > /tmp/sendmail.from
+ #echo "MyMailFrom $SysMailFrom" >> /tmp/sendmail.from
+ #echo 
+    
+
 # Modify the To addresses
-  if [ -n "$MailTo" ] ; then   echo "havemailto"
+#echo "$Input" |grep To: > /tmp/sendmail.to
+echo "$Input" |grep -q To:|grep -q @|| { 
+  test -e /etc/aliases.msmtp  && { 
+    #echo alias
+    aliasuser=$(echo "$Input" |grep To: |sed 's/To: //g')
+    #echo newuser from $aliasuser
+    [ -n "$aliasuser" ] && { 
+    newuser=$(grep ^${aliasuser} /etc/aliases.msmtp|cut -d: -f2- |sed 's/ \+//g');
+    #echo relace $newuser sed 's/To: .\+/To: '${newuser}'/g';
+    [ -n "$newuser" ] && Input=$(echo "$Input" |sed 's/^To:.\+/To: '${newuser}'/g'  ) ; } ; };
+#echo "$Input" |grep To: >> /tmp/sendmail.to ;
+#echo afterrepl
+  echo -n ; } ;
+
+
+# Overwrite the To addresses
+
+  if [ -n "$MailTo" ] ; then  
    if [ "$ReplaceMailTo" -eq 1 ] ; then
 
    ## WE KNOW THAT CRON SETS THE DESTINATION AS LAST ARGUMENT
@@ -121,6 +150,11 @@ if [ "$Cron" -eq 1 ] ; then
     Args[${#Args[@]} - 1]='$MailTo'
     Input=$(echo "$Input" | perl -0777 -p -e "\$t='$MailTo';" -e 's/^To: .*$/To: $t/m')
   fi  
+
+
+
+
+#####  
 
 # Send the email
     export TMPDIR=/tmp/
