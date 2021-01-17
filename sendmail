@@ -10,7 +10,7 @@ verbose=0
 
 LogDebug=1
 
-## if you want to send it , enable this 
+## if you want to send it , enable this
 EmailOutput=1
 
 ##ONLY FOR TESTING
@@ -20,7 +20,7 @@ LogMailContent=0
 
 
 ##ONLY FOR TESTING
-## DO NOT LOG IN REAL LIFE 
+## DO NOT LOG IN REAL LIFE
 
 SysMailFrom=$(grep from  /etc/msmtprc |grep "@"|sed 's/from\( \+\|\t\+\)//g'|sed 's/"//g')
 
@@ -47,7 +47,7 @@ for ArgNum in "${!Args[@]}" ; do
     Cron=1
     break
   fi
-  
+
 
 ### since the following msmtp will not double-quote our sender name,
 ### we are going to change data that were blindly sent with @ inside the string
@@ -69,11 +69,11 @@ if [ "$Cron" -eq 0 ] ; then
     #echo "sending" "${Args[@]}"
     [ "${LogMailContent}" -eq 1 ] && {  echo "$Input" | tee /tmp/sendbmail.passrh.log | /usr/sbin/sendmail.real "${Args[@]}" ; } ;
     [ "${LogMailContent}" -eq 1 ] || {  echo "$Input" | /usr/sbin/sendmail.real "${Args[@]}" ; } ;
-    
+    returnval=$?
     [ "${LogDebug}" -eq 1 ] && ( echo "DEBUG:ARGS: " "${Args[@]}" > /tmp/sendmail.debug.log )
     [ "${verbose}"  -eq 1 ] && ( echo "PASSTHROUGH" >> /tmp/sendmail.debug.log )
-    
-    exit $?
+
+    exit $returnval
 fi
 ########### END NORMAL MAIL
 
@@ -94,7 +94,7 @@ if [ "$Cron" -eq 1 ] ; then
 
 ## we plan to send something
 #    if [ "$EmailOutput"  -eq 1 ] ; then
-#    
+#
 #    fi
 
 
@@ -114,17 +114,17 @@ if [ "$Cron" -eq 1 ] ; then
     Input="$(echo "$Input" | sed 's/^From: \(.*\)/From: \1 <'${SysMailFrom}'> /m')"
  #echo "$Input" |grep From: > /tmp/sendmail.from
  #echo "MyMailFrom $SysMailFrom" >> /tmp/sendmail.from
- #echo 
-    
+ #echo
+
 
 # Modify the To addresses
 #echo "$Input" |grep To: > /tmp/sendmail.to
-echo "$Input" |grep -q To:|grep -q @|| { 
-  test -e /etc/aliases.msmtp  && { 
+echo "$Input" |grep -q To:|grep -q @|| {
+  test -e /etc/aliases.msmtp  && {
     #echo alias
     aliasuser=$(echo "$Input" |grep To: |sed 's/To: //g')
     #echo newuser from $aliasuser
-    [ -n "$aliasuser" ] && { 
+    [ -n "$aliasuser" ] && {
     newuser=$(grep ^${aliasuser} /etc/aliases.msmtp|cut -d: -f2- |sed 's/ \+//g');
     #echo relace $newuser sed 's/To: .\+/To: '${newuser}'/g';
     [ -n "$newuser" ] && Input=$(echo "$Input" |sed 's/^To:.\+/To: '${newuser}'/g'  ) ; } ; };
@@ -135,7 +135,7 @@ echo "$Input" |grep -q To:|grep -q @|| {
 
 # Overwrite the To addresses
 
-  if [ -n "$MailTo" ] ; then  
+  if [ -n "$MailTo" ] ; then
    if [ "$ReplaceMailTo" -eq 1 ] ; then
 
    ## WE KNOW THAT CRON SETS THE DESTINATION AS LAST ARGUMENT
@@ -149,18 +149,18 @@ echo "$Input" |grep -q To:|grep -q @|| {
     fi
     Args[${#Args[@]} - 1]='$MailTo'
     Input=$(echo "$Input" | perl -0777 -p -e "\$t='$MailTo';" -e 's/^To: .*$/To: $t/m')
-  fi  
+  fi
 
 
 
 
-#####  
+#####
 
 # Send the email
     export TMPDIR=/tmp/
     [ "${LogMailContent}" -eq 1 ] && {  echo "$Input" | tee /tmp/sendbmail.passrh.log | /usr/sbin/sendmail.real "${Args[@]}" ; } ;
     [ "${LogMailContent}" -eq 1 ] || {  echo "$Input" | /usr/sbin/sendmail.real "${Args[@]}" ; } ;
-    
+
     [ "${LogDebug}" -eq 1 ] && ( echo "DEBUG:ARGS: " "${Args[@]}" > /tmp/sendmail.debug.log )
     [ "${verbose}"  -eq 1 ] && ( echo "PASSTHROUGH" >> /tmp/sendmail.debug.log )
     Status=$?
